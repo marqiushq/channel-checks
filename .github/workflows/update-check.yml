@@ -1,0 +1,45 @@
+name: Update check
+
+# marqius-wkhtmltopdf updating itself on Windows (marqius-wkhtmltopdf update): a build not released
+# yet, kept in the private checks, updates to GitHub's release while it is running. Started by hand.
+on:
+  workflow_dispatch:
+    inputs:
+      candidate:
+        description: "The private checks' release that holds the build to start from"
+        required: true
+      to:
+        description: "The release to update to (empty: the latest)"
+        required: false
+        default: ""
+
+permissions: {}
+
+jobs:
+  update-windows:
+    name: Its own update on Windows (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, windows-2022]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    steps:
+      - name: Fetch the private checks
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: marqiushq/windows
+          token: ${{ secrets.CHECKS_TOKEN }}
+          persist-credentials: false
+      - name: Fetch the build to start from
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.CHECKS_TOKEN }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: gh release download "$env:CANDIDATE" -R marqiushq/windows -p marqius-wkhtmltopdf.exe -D candidate
+      - name: It updates itself while it runs
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          TO: ${{ inputs.to }}
+        run: ./test/update.ps1 -Exe candidate/marqius-wkhtmltopdf.exe -To "$env:TO"
