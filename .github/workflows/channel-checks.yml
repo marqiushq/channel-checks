@@ -1,0 +1,81 @@
+name: Channel checks
+
+on:
+  schedule:
+    - cron: "23 */3 * * *"
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version for the release watch (empty: the latest release)"
+        required: false
+        default: ""
+
+permissions: {}
+
+concurrency:
+  group: channel-checks
+  cancel-in-progress: false
+
+jobs:
+  release-watch:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Fetch the private checks
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: marqiushq/release-watch
+          token: ${{ secrets.CHECKS_TOKEN }}
+          persist-credentials: false
+      - name: Release watch
+        env:
+          GH_TOKEN: ${{ secrets.CHECKS_TOKEN }}
+          VERSION: ${{ inputs.version }}
+        run: python3 -I watch.py
+
+  rubygems-windows:
+    name: RubyGems on Windows (Ruby ${{ matrix.ruby }}, ${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { runner: windows-2025, ruby: "4.0" }
+          - { runner: windows-2022, ruby: "3.2" }
+          - { runner: windows-2022, ruby: "3.0" }
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Fetch the private checks
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: marqiushq/windows
+          token: ${{ secrets.CHECKS_TOKEN }}
+          persist-credentials: false
+      - uses: ruby/setup-ruby@be3c7df29b3349ec6bcfc6b4792f1cf9f5237d18 # v1.343.0
+        with:
+          ruby-version: ${{ matrix.ruby }}
+      - name: Install from RubyGems and use it
+        shell: pwsh
+        run: ./test/gem.ps1 -Out out -Web
+
+  download-windows:
+    name: marqius.com download on Windows (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [windows-2025, windows-2022]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+    steps:
+      - name: Fetch the private checks
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: marqiushq/windows
+          token: ${{ secrets.CHECKS_TOKEN }}
+          persist-credentials: false
+      - name: Download from marqius.com and check its sum
+        shell: pwsh
+        run: ./test/fetch.ps1 -Dest bin
+      - name: Use it as applications do
+        shell: pwsh
+        run: ./test/smoke.ps1 -Exe bin/marqius-wkhtmltopdf.exe -Version (Get-Content bin/VERSION) -Out out -Names -Web
