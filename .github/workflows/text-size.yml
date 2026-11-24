@@ -94,7 +94,10 @@ jobs:
           CANDIDATE: ${{ inputs.candidate }}
         run: |
           if [ "$RUNNER_OS" = Windows ]; then f=marqius-wkhtmltopdf.exe; else f=marqius-wkhtmltopdf; fi
-          gh release download "$CANDIDATE" -R marqiushq/windows -p "$f" -D candidate
+          if ! gh release download "$CANDIDATE" -R marqiushq/windows -p "$f" -D candidate; then
+            echo "$CANDIDATE holds no $f: this system is measured without the build"
+            exit 0
+          fi
           chmod +x "candidate/$f"
           p="$PWD/candidate/$f"; [ "$RUNNER_OS" = Windows ] && p=$(cygpath -w "$p")
           echo "CAND=$p" >> "$GITHUB_ENV"
