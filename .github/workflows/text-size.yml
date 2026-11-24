@@ -1,0 +1,147 @@
+name: Text size on Windows
+
+# What wkhtmltopdf 0.12.6, libwkhtmltox 0.12.4 (as DinkToPdf carries it) and marqius-wkhtmltopdf make of
+# the same documents on Windows and on Linux, with and without the options that change sizes, measured
+# from their PDFs; and what GDI gives each Windows font at each size. Started by hand.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The marqius-wkhtmltopdf release to measure (empty: the latest)"
+        required: false
+        default: ''
+      candidate:
+        description: "The private checks' release that holds a build not released yet (empty: none)"
+        required: false
+        default: ''
+
+permissions: {}
+
+jobs:
+  measure:
+    name: Measure (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    steps:
+      - name: Fetch the private checks
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: marqiushq/windows
+          token: ${{ secrets.CHECKS_TOKEN }}
+          persist-credentials: false
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
+        with:
+          python-version: "3.13"
+      - name: Readers of PDFs and fonts
+        run: python -m pip install --disable-pip-version-check -q pypdfium2==5.15.2 fonttools==4.68.0
+      - name: The font both systems share
+        run: python -I test/sizes/sizes.py font testface.ttf
+      - name: wkhtmltopdf 0.12.6 and libwkhtmltox 0.12.4 (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $setup = Join-Path $env:RUNNER_TEMP 'wkhtmltox-0.12.6-1.msvc2015-win64.exe'
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6-1/wkhtmltox-0.12.6-1.msvc2015-win64.exe' -OutFile $setup
+          Write-Host ("wkhtmltox-0.12.6-1.msvc2015-win64.exe SHA-256 " + (Get-FileHash $setup -Algorithm SHA256).Hash)
+          Start-Process -FilePath $setup -ArgumentList '/S' -Wait
+          & 'C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe' -V
+          New-Item -ItemType Directory -Force -Path lib04 | Out-Null
+          Invoke-WebRequest -UseBasicParsing -Uri 'https://raw.githubusercontent.com/rdvojmoc/DinkToPdf/b0546d21641eaef71f6fe0ddfd3998e8502baab7/v0.12.4/64%20bit/libwkhtmltox.dll' -OutFile lib04/libwkhtmltox.dll
+          $h = (Get-FileHash lib04/libwkhtmltox.dll -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne '6763fcc0707eca0a7f8d02495fb58d9c996282bd328573882d8bbbde60666f19') { throw "libwkhtmltox.dll is not the file DinkToPdf carries ($h)" }
+          "WK=C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe" >> $env:GITHUB_ENV
+          "LIB=$((Resolve-Path lib04/libwkhtmltox.dll).Path)" >> $env:GITHUB_ENV
+      - name: wkhtmltopdf 0.12.6 and libwkhtmltox 0.12.4 (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/wkhtmltox.deb" https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6.1-3/wkhtmltox_0.12.6.1-3.jammy_amd64.deb
+          echo "4f723b2691ad8638a9df960e0421d346d7315083e3583a334f33362280ddba15  $RUNNER_TEMP/wkhtmltox.deb" | sha256sum -c -
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq fonts-liberation libx11-6 libxext6 libxrender1 libfontconfig1 libfreetype6 "$RUNNER_TEMP/wkhtmltox.deb" > /dev/null
+          wkhtmltopdf -V
+          mkdir -p lib04
+          curl -fsSL -o lib04/libwkhtmltox.so "https://raw.githubusercontent.com/rdvojmoc/DinkToPdf/b0546d21641eaef71f6fe0ddfd3998e8502baab7/v0.12.4/64%20bit/libwkhtmltox.so"
+          echo "f134eb7ecd429d4c182ab41518c0d7d888cbb040ff5571750ca5657a6938975a  lib04/libwkhtmltox.so" | sha256sum -c -
+          echo "WK=$(command -v wkhtmltopdf)" >> "$GITHUB_ENV"
+          echo "LIB=$PWD/lib04/libwkhtmltox.so" >> "$GITHUB_ENV"
+      - name: marqius-wkhtmltopdf (the release), checked
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          tag=${VERSION:+v$VERSION}
+          tag=${tag:-$(gh release view -R marqiushq/marqius-wkhtmltopdf --json tagName --jq .tagName)}
+          if [ "$RUNNER_OS" = Windows ]; then f=marqius-wkhtmltopdf-windows-x86_64.exe; else f=marqius-wkhtmltopdf-linux-x86_64; fi
+          gh release download "$tag" -R marqiushq/marqius-wkhtmltopdf -p "$f" -p "$f.sha256" -D mq
+          (cd mq && sha256sum -c "$f.sha256")
+          chmod +x "mq/$f"
+          p="$PWD/mq/$f"; [ "$RUNNER_OS" = Windows ] && p=$(cygpath -w "$p")
+          echo "MQ=$p" >> "$GITHUB_ENV"
+          echo "marqius-wkhtmltopdf $tag"
+      - name: The build not released yet
+        if: inputs.candidate != ''
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.CHECKS_TOKEN }}
+          CANDIDATE: ${{ inputs.candidate }}
+        run: |
+          if [ "$RUNNER_OS" = Windows ]; then f=marqius-wkhtmltopdf.exe; else f=marqius-wkhtmltopdf; fi
+          gh release download "$CANDIDATE" -R marqiushq/windows -p "$f" -D candidate
+          chmod +x "candidate/$f"
+          p="$PWD/candidate/$f"; [ "$RUNNER_OS" = Windows ] && p=$(cygpath -w "$p")
+          echo "CAND=$p" >> "$GITHUB_ENV"
+          sha256sum "candidate/$f"
+      - name: Every document with every option set, by every program
+        shell: bash
+        run: |
+          progs=("wk=$WK" "lib=$LIB" "mq=$MQ")
+          [ -n "$CAND" ] && progs+=("cand=$CAND")
+          python -I test/sizes/sizes.py run "out/${{ runner.os }}" --font testface.ttf "${progs[@]}"
+      - name: What GDI gives each font, per size (Windows)
+        if: runner.os == 'Windows'
+        run: python -I test/sizes/sizes.py gdi out/Windows testface.ttf
+      - name: The build beside wkhtmltopdf 0.12.6 on this system, by marqius compare
+        if: inputs.candidate != ''
+        shell: bash
+        run: |
+          for opt in base nosmart dpi300 zoom15 print; do
+            mkdir -p "out/proof/wk-$opt" "out/proof/cand-$opt"
+            for d in text page picture table header-text header-html; do
+              cp "out/${{ runner.os }}/wk/$d/$opt.pdf" "out/proof/wk-$opt/$d.pdf" || true
+              cp "out/${{ runner.os }}/cand/$d/$opt.pdf" "out/proof/cand-$opt/$d.pdf" || true
+            done
+            echo "== $opt"
+            "$CAND" compare "out/proof/wk-$opt" "out/proof/cand-$opt" -o "out/proof/report-$opt" | tail -n 25 || true
+          done
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: sizes-${{ runner.os }}
+          path: |
+            out/${{ runner.os }}/geometry.json
+            out/${{ runner.os }}/gdi.json
+          retention-days: 3
+
+  compare:
+    name: Windows beside Linux
+    needs: measure
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Fetch the private checks
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          repository: marqiushq/windows
+          token: ${{ secrets.CHECKS_TOKEN }}
+          persist-credentials: false
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          path: in
+      - name: The comparison
+        run: python3 -I test/sizes/sizes.py compare in/sizes-Windows in/sizes-Linux out
