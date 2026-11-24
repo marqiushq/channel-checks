@@ -114,7 +114,7 @@ jobs:
         run: |
           for opt in base nosmart dpi300 zoom15 print; do
             mkdir -p "out/proof/wk-$opt" "out/proof/cand-$opt"
-            for d in text page picture table header-text header-html; do
+            for d in text-s text-r text-m text-f text-d page page-f picture table header-text header-html webfont; do
               cp "out/${{ runner.os }}/wk/$d/$opt.pdf" "out/proof/wk-$opt/$d.pdf" || true
               cp "out/${{ runner.os }}/cand/$d/$opt.pdf" "out/proof/cand-$opt/$d.pdf" || true
             done
