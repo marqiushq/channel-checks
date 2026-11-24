@@ -48,7 +48,8 @@ jobs:
           $ProgressPreference = 'SilentlyContinue'
           $setup = Join-Path $env:RUNNER_TEMP 'wkhtmltox-0.12.6-1.msvc2015-win64.exe'
           Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/wkhtmltopdf/packaging/releases/download/0.12.6-1/wkhtmltox-0.12.6-1.msvc2015-win64.exe' -OutFile $setup
-          Write-Host ("wkhtmltox-0.12.6-1.msvc2015-win64.exe SHA-256 " + (Get-FileHash $setup -Algorithm SHA256).Hash)
+          $h = (Get-FileHash $setup -Algorithm SHA256).Hash.ToLower()
+          if ($h -ne '1efcfaf8472871268fd399865a3e62b435b91d4413009b80830eaaff7a57d088') { throw "the wkhtmltopdf 0.12.6 installer is not the file this check knows ($h)" }
           Start-Process -FilePath $setup -ArgumentList '/S' -Wait
           & 'C:\Program Files\wkhtmltopdf\bin\wkhtmltopdf.exe' -V
           New-Item -ItemType Directory -Force -Path lib04 | Out-Null
